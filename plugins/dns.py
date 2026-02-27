@@ -46,7 +46,7 @@ def relay_dns_query(domain: str):
 def sniff(handler):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     IP = "0.0.0.0"
-    PORT = 53
+    PORT = config['port']
     sock.bind((IP, PORT))
     while True:
         try:
