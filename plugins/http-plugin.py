@@ -32,6 +32,7 @@ class S(BaseHTTPRequestHandler):
     def _set_headers(self):
         self.send_response(200)
         self.send_header('Content-type', 'text/html')
+        self.send_header("Content-Length", str(len(html_content)))
         self.end_headers()
         self.wfile.write(html_content.encode())
 
